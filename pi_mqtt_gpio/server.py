@@ -45,8 +45,6 @@ STREAM_WRITE_CONFIGS = {}  # storage for streams write configs
 LAST_STATES = {}
 GPIO_INTERRUPT_LOOKUP = {}
 SET_TOPIC = "set"
-SET_ON_MS_TOPIC = "set_on_ms"
-SET_OFF_MS_TOPIC = "set_off_ms"
 OUTPUT_TOPIC = "output"
 INPUT_TOPIC = "input"
 SENSOR_TOPIC = "sensor"
@@ -229,55 +227,7 @@ def handle_set(topic_prefix, msg):
 
     value = payload == output_config["on_payload"]
     set_pin(topic_prefix, output_config, value)
-
-    try:
-        ms = output_config["timed_set_ms"]
-    except KeyError:
-        return
-    scheduler.add_task(
-        Task(time() + ms / 1000.0, set_pin, topic_prefix, output_config, not value)
-    )
-    _LOG.info(
-        "Scheduled output %r to change back to %r after %r ms.",
-        output_config["name"],
-        not value,
-        ms,
-    )
-
-
-def handle_set_ms(topic_prefix, msg, value):
-    """
-    Handles an incoming 'set_<on/off>_ms' MQTT message.
-    :param topic_prefix: the name of the topic
-    :type topic_prefix: string
-    :param msg: The incoming MQTT message
-    :type msg: paho.mqtt.client.MQTTMessage
-    :param value: The value to set the output to
-    :type value: bool
-    :return: None
-    :rtype: NoneType
-    """
-    try:
-        ms = int(msg.payload)
-    except ValueError:
-        raise InvalidPayload("Could not parse ms value %r to an integer." % msg.payload)
-    suffix = SET_ON_MS_TOPIC if value else SET_OFF_MS_TOPIC
-    output_name = output_name_from_topic(msg.topic, topic_prefix, suffix)
-    output_config = output_by_name(output_name)
-    if output_config is None:
-        return
-
-    set_pin(topic_prefix, output_config, value)
-    scheduler.add_task(
-        Task(time() + ms / 1000.0, set_pin, topic_prefix, output_config, not value)
-    )
-    _LOG.info(
-        "Scheduled output %r to change back to %r after %r ms.",
-        output_config["name"],
-        not value,
-        ms,
-    )
-
+    
 
 def handle_raw(topic_prefix, msg):
     """
@@ -459,15 +409,14 @@ def init_mqtt(config, digital_outputs, stream_writes):
                 "Connected to the MQTT broker with protocol v%s.", config["protocol"]
             )
             for out_conf in digital_outputs:
-                for suffix in (SET_TOPIC, SET_ON_MS_TOPIC, SET_OFF_MS_TOPIC):
-                    topic = "%s/%s/%s/%s" % (
-                        topic_prefix,
-                        OUTPUT_TOPIC,
-                        out_conf["name"],
-                        suffix,
-                    )
-                    client.subscribe(topic, qos=1)
-                    _LOG.info("Subscribed to topic: %r", topic)
+                topic = "%s/%s/%s/%s" % (
+                    topic_prefix,
+                    OUTPUT_TOPIC,
+                    out_conf["name"],
+                    SET_TOPIC,
+                )
+                client.subscribe(topic, qos=1)
+                _LOG.info("Subscribed to topic: %r", topic)
             for stream_write_conf in stream_writes:
                 topic = "%s/%s/%s" % (
                     topic_prefix,
@@ -526,10 +475,6 @@ def init_mqtt(config, digital_outputs, stream_writes):
             if topic_type == OUTPUT_TOPIC:
                 if msg.topic.endswith("/%s" % SET_TOPIC):
                     handle_set(topic_prefix, msg)
-                elif msg.topic.endswith("/%s" % SET_ON_MS_TOPIC):
-                    handle_set_ms(topic_prefix, msg, True)
-                elif msg.topic.endswith("/%s" % SET_OFF_MS_TOPIC):
-                    handle_set_ms(topic_prefix, msg, False)
                 else:
                     _LOG.warning("Unhandled output topic %r.", msg.topic)
             elif topic_type == STREAM_TOPIC:
