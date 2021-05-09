@@ -6,77 +6,19 @@ mqtt:
   topic_prefix: pimqttgpio/mydevice
 
 gpio_modules:
-  - name: raspberrypi
+  - name: rpi
     module: raspberrypi
-
-  - name: pcf8574
-    module: pcf8574
-    i2c_bus_num: 1
-    chip_addr: 0x20
-
-  - name: dev
-    module: stdio
-    cleanup: no
-
-  - name: orangepi
-    module: orangepi
-    board: zero
-    mode: board
-
-  - name: gpiochip0
-    module: gpiod
-    chip: /dev/gpiochip0
-
-sensor_modules:
-  - name: lm75
-    module: lm75
-    i2c_bus_num: 1
-    chip_addr: 0x48
-
-  - name: ds18b22
-    module: ds18b
-    type: DS18S20
-    address: 000803702e49
 
 digital_inputs:
-  - name: button
-    module: raspberrypi
-    pin: 21
-    on_payload: "ON"
-    off_payload: "OFF"
-    pullup: no
-    pulldown: yes
-    
-  - name: button_left
-    module: raspberrypi
-    pin: 23
-    interrupt_payload: "trigger"
-    pullup: no
-    pulldown: yes
-    interrupt: falling
-    bouncetime: 200
+  - name: DoorBell_1
+    module: rpi
+    pin: 16
+    on_payload: "true"
+    off_payload: "false"
 
 digital_outputs:
-  - name: bell
-    module: pcf8574
-    pin: 5
-    on_payload: "ON"
-    off_payload: "OFF"
-    initial: low
-
-  - name: test
-    module: dev
-    pin: 1
-    on_payload: "ON"
-    off_payload: "OFF"
-
-sensor_inputs:
-  - name: temp_lm75
-    module: lm75
-    interval: 15
-    digits: 4
-
-  - name: temp_dsb18
-    module: ds18b22
-    interval: 10
-    digits: 2
+  - name: DoorOpen
+    module: rpi
+    pin: 17
+    on_payload: "true"
+    off_payload: "false
