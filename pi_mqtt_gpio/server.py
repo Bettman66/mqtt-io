@@ -6,7 +6,6 @@ import socket
 import ssl
 import sys
 import threading
-from functools import reduce
 from hashlib import sha1
 from importlib import import_module
 from time import sleep, time
@@ -19,11 +18,6 @@ from pi_mqtt_gpio import CONFIG_SCHEMA
 from pi_mqtt_gpio.modules import BASE_SCHEMA, InterruptEdge, PinDirection, PinPullup
 from pi_mqtt_gpio.scheduler import Scheduler, Task
 
-try:
-    from math import gcd
-except ImportError:
-    from fractions import gcd
-
 LOG_LEVEL_MAP = {
     mqtt.MQTT_LOG_INFO: logging.INFO,
     mqtt.MQTT_LOG_NOTICE: logging.INFO,
@@ -34,21 +28,11 @@ LOG_LEVEL_MAP = {
 
 RECONNECT_DELAY_SECS = 5
 GPIO_MODULES = {}  # storage for gpio modules
-SENSOR_MODULES = {}  # storage for sensor modules
-STREAM_MODULES = {}  # storage for stream modules
 GPIO_CONFIGS = {}  # storage for gpios
-SENSOR_CONFIGS = {}  # storage for sensors
-STREAM_CONFIGS = {}  # storage for streams
-SENSOR_INPUT_CONFIGS = {}  # storage for sensor input configs
-STREAM_READ_CONFIGS = {}  # storage for streams read configs
-STREAM_WRITE_CONFIGS = {}  # storage for streams write configs
 LAST_STATES = {}
 GPIO_INTERRUPT_LOOKUP = {}
-SET_TOPIC = "set"
 OUTPUT_TOPIC = "output"
 INPUT_TOPIC = "input"
-SENSOR_TOPIC = "sensor"
-STREAM_TOPIC = "stream"
 
 _LOG = logging.getLogger("mqtt_gpio")
 
@@ -94,7 +78,6 @@ class ConfigValidator(cerberus.Validator):
         """
         return str(value)
 
-
 def on_log(client, userdata, level, buf):
     """
     Called when MQTT client wishes to log something.
@@ -106,34 +89,6 @@ def on_log(client, userdata, level, buf):
     :rtype: NoneType
     """
     _LOG.log(LOG_LEVEL_MAP[level], "MQTT client: %s" % buf)
-
-
-def output_by_name(output_name):
-    """
-    Returns the output configuration for a given output name.
-    :param output_name: The name of the output
-    :type output_name: str
-    :return: The output configuration or None if not found
-    :rtype: dict
-    """
-    for output in digital_outputs:
-        if output["name"] == output_name:
-            return output
-    _LOG.warning("No output found with name of %r", output_name)
-
-
-def stream_write_by_name(name):
-    """
-    Returns the stream write configuration for a given name.
-    :param name: The name of the write
-    :type output_name: str
-    :return: The output configuration or None if not found
-    :rtype: dict
-    """
-    for write in stream_writes:
-        if write["name"] == name:
-            return write
-    _LOG.warning("No write found with name of %r", name)
 
 
 def set_pin(topic_prefix, output_config, value):
@@ -154,38 +109,9 @@ def set_pin(topic_prefix, output_config, value):
     _LOG.info(
         "Set %r output %r to %r",
         output_config["module"],
-        output_config["name"],
+        output_config["name"] ,
         set_value,
     )
-    payload = output_config["on_payload" if value else "off_payload"]
-    client.publish(
-        "%s/%s/%s" % (topic_prefix, OUTPUT_TOPIC, output_config["name"]),
-        retain=output_config["retain"],
-        payload=payload,
-    )
-
-
-def stream_write_output(topic_prefix, stream_write_config, data):
-    """
-    Writes data to stream
-    :param topic_prefix: the name of the topic, the pin is published
-    :type topic_prefix: string
-    :param stream_write_config: The write stream configuration
-    :type stream_write_config: dict
-    :param data: data to write
-    :type value: string
-    :return: None
-    :rtype: NoneType
-    """
-    sw = STREAM_MODULES[stream_write_config["module"]]
-    sw.write(stream_write_config["name"], data.encode("utf-8"))
-    _LOG.info(
-        "Write %r %r write %s",
-        stream_write_config["module"],
-        stream_write_config["name"],
-        data,
-    )
-
 
 def get_pin(in_conf, module):
     """
@@ -200,6 +126,18 @@ def get_pin(in_conf, module):
     state = bool(module.get_pin(in_conf["pin"]))
     return state != in_conf["inverted"]
 
+def output_by_name(output_name):
+    """
+    Returns the output configuration for a given output name.
+    :param output_name: The name of the output
+    :type output_name: str
+    :return: The output configuration or None if not found
+    :rtype: dict
+    """
+    for output in digital_outputs:
+        if output["name"] == output_name:
+            return output
+    _LOG.warning("No output found with name of %r", output_name)
 
 def handle_set(topic_prefix, msg):
     """
@@ -211,7 +149,7 @@ def handle_set(topic_prefix, msg):
     :return: None
     :rtype: NoneType
     """
-    output_name = output_name_from_topic(msg.topic, topic_prefix, SET_TOPIC)
+    output_name = output_name_from_topic(msg.topic, topic_prefix)
     output_config = output_by_name(output_name)
     if output_config is None:
         return
@@ -227,25 +165,6 @@ def handle_set(topic_prefix, msg):
 
     value = payload == output_config["on_payload"]
     set_pin(topic_prefix, output_config, value)
-    
-
-def handle_raw(topic_prefix, msg):
-    """
-    Handles an incoming raw MQTT message.
-    :param topic_prefix: the name of the topic
-    :type topic_prefix: string
-    :param msg: The incoming MQTT message
-    :type msg: paho.mqtt.client.MQTTMessage
-    :return: None
-    :rtype: NoneType
-    """
-    stream_write_name = stream_write_name_from_topic(msg.topic, topic_prefix)
-    stream_write_config = stream_write_by_name(stream_write_name)
-    if stream_write_config is None:
-        return
-    payload = msg.payload.decode("string_escape")
-    stream_write_output(topic_prefix, stream_write_config, payload)
-
 
 def install_missing_requirements(module):
     """
@@ -299,49 +218,28 @@ def type_from_topic(topic, topic_prefix):
     fields = s.split("/")
     return fields[0]
 
-
-def output_name_from_topic(topic, topic_prefix, suffix):
+def output_name_from_topic(topic, topic_prefix):
     """
     Return the name of the output which the topic is setting.
-    :param topic: String such as 'mytopicprefix/output/tv_lamp/set'
+    :param topic: String such as 'mytopicprefix/output/tv_lamp'
     :type topic: str
     :param topic_prefix: Prefix of our topicsclient,
     :type topic_prefix: str
-    :param suffix: The suffix of the topic such as "set" or "set_ms"
-    :type suffix: str
     :return: Name of the output this topic is setting
     :rtype: str
     """
-    if not topic.endswith("/%s" % suffix):
-        raise ValueError("This topic does not end with '/%s'" % suffix)
+
     lindex = len("%s/%s/" % (topic_prefix, OUTPUT_TOPIC))
-    rindex = -len(suffix) - 1
+    rindex = len(topic)
     return topic[lindex:rindex]
 
-
-def stream_write_name_from_topic(topic, topic_prefix):
-    """
-    Return the name of the stream write which the topic is setting.
-    :param topic: String such as 'mytopicprefix/stream/tx'
-    :type topic: str
-    :param topic_prefix: Prefix of our topicsclient,
-    :type topic_prefix: str
-    :return: Name of the output this topic is setting
-    :rtype: str
-    """
-    lindex = len("%s/%s/" % (topic_prefix, STREAM_TOPIC))
-    return topic[lindex:]
-
-
-def init_mqtt(config, digital_outputs, stream_writes):
+def init_mqtt(config, digital_outputs):
     """
     Configure MQTT client.
     :param config: Validated config dict containing MQTT connection details
     :type config: dict
     :param digital_outputs: List of validated config dicts for digital outputs
     :type digital_outputs: list
-    :param stream_writes: List of validated config dicts for stream writes
-    :type stream_writes: list
     :return: Connected and initialised MQTT client
     :rtype: paho.mqtt.client.Client
     """
@@ -409,33 +307,16 @@ def init_mqtt(config, digital_outputs, stream_writes):
                 "Connected to the MQTT broker with protocol v%s.", config["protocol"]
             )
             for out_conf in digital_outputs:
-                topic = "%s/%s/%s/%s" % (
+                topic = "%s/%s/%s" % (
                     topic_prefix,
                     OUTPUT_TOPIC,
                     out_conf["name"],
-                    SET_TOPIC,
-                )
-                client.subscribe(topic, qos=1)
-                _LOG.info("Subscribed to topic: %r", topic)
-            for stream_write_conf in stream_writes:
-                topic = "%s/%s/%s" % (
-                    topic_prefix,
-                    STREAM_TOPIC,
-                    stream_write_conf["name"],
                 )
                 client.subscribe(topic, qos=1)
                 _LOG.info("Subscribed to topic: %r", topic)
             client.publish(
                 status_topic, config["status_payload_running"], qos=1, retain=True
             )
-            # HASS
-            if config["discovery"]:
-                for in_conf in digital_inputs:
-                    hass_announce_digital_input(in_conf, topic_prefix, config)
-                for out_conf in digital_outputs:
-                    hass_announce_digital_output(out_conf, topic_prefix, config)
-                for in_conf in sensor_inputs:
-                    hass_announce_sensor_input(in_conf, topic_prefix, config)
         elif rc == 1:
             _LOG.fatal("Incorrect protocol version used to connect to MQTT broker.")
             sys.exit(1)
@@ -473,12 +354,7 @@ def init_mqtt(config, digital_outputs, stream_writes):
                 msg.payload,
             )
             if topic_type == OUTPUT_TOPIC:
-                if msg.topic.endswith("/%s" % SET_TOPIC):
-                    handle_set(topic_prefix, msg)
-                else:
-                    _LOG.warning("Unhandled output topic %r.", msg.topic)
-            elif topic_type == STREAM_TOPIC:
-                handle_raw(topic_prefix, msg)
+                handle_set(topic_prefix, msg)
             else:
                 _LOG.warning("Unhandled topic %r.", msg.topic)
         except InvalidPayload as exc:
@@ -512,48 +388,6 @@ def configure_gpio_module(gpio_config):
     gpio_config = module_validator.normalized(gpio_config)
     install_missing_requirements(gpio_module)
     return gpio_module.GPIO(gpio_config)
-
-
-def configure_sensor_module(sensor_config):
-    """
-    Imports sensor module, validates its config and returns an instance of it.
-    :param sensor_config: Module configuration values
-    :type sensor_config: dict
-    :return: Configured instance of the sensor module
-    :rtype: pi_mqtt_gpio.modules.GenericSensor
-    """
-    sensor_module = import_module("pi_mqtt_gpio.modules.%s" % sensor_config["module"])
-    # Doesn't need to be a deep copy because we won't modify the base
-    # validation rules, just add more of them.
-    module_config_schema = BASE_SCHEMA.copy()
-    module_config_schema.update(getattr(sensor_module, "CONFIG_SCHEMA", {}))
-    module_validator = cerberus.Validator(module_config_schema)
-    if not module_validator.validate(sensor_config):
-        raise ModuleConfigInvalid(module_validator.errors)
-    sensor_config = module_validator.normalized(sensor_config)
-    install_missing_requirements(sensor_module)
-    return sensor_module.Sensor(sensor_config)
-
-
-def configure_stream_module(stream_config):
-    """
-    Imports stream module, validates its config and returns an instance of it.
-    :param stream_config: Module configuration values
-    :type stream_config: dict
-    :return: Configured instance of the stream module
-    :rtype: pi_mqtt_gpio.modules.GenericStream
-    """
-    stream_module = import_module("pi_mqtt_gpio.modules.%s" % stream_config["module"])
-    # Doesn't need to be a deep copy because we won't modify the base
-    # validation rules, just add more of them.
-    module_config_schema = BASE_SCHEMA.copy()
-    module_config_schema.update(getattr(stream_module, "CONFIG_SCHEMA", {}))
-    module_validator = cerberus.Validator(module_config_schema)
-    if not module_validator.validate(stream_config):
-        raise ModuleConfigInvalid(module_validator.errors)
-    stream_config = module_validator.normalized(stream_config)
-    install_missing_requirements(stream_module)
-    return stream_module.Stream(stream_config)
 
 
 def initialise_digital_input(in_conf, gpio):
@@ -624,226 +458,6 @@ def initialise_digital_output(out_conf, gpio):
     gpio.setup_pin(out_conf["pin"], PinDirection.OUTPUT, None, out_conf)
 
 
-def validate_sensor_input_config(sens_conf):
-    """
-    Validates sensor input config.
-    :param sens_conf: Sensor input config
-    :type sens_conf: dict
-    :return: None
-    :rtype: NoneType
-    """
-    sensor_module = import_module(
-        "pi_mqtt_gpio.modules.%s" % SENSOR_CONFIGS[sens_conf["module"]]["module"]
-    )
-    # Doesn't need to be a deep copy because we won't modify the base
-    # validation rules, just add more of them.
-    sensor_input_schema = CONFIG_SCHEMA["sensor_inputs"]["schema"]["schema"].copy()
-    sensor_input_schema.update(getattr(sensor_module, "SENSOR_SCHEMA", {}))
-    sensor_validator = cerberus.Validator(sensor_input_schema)
-    if not sensor_validator.validate(sens_conf):
-        raise ModuleConfigInvalid(sensor_validator.errors)
-    return sensor_validator.normalized(sens_conf)
-
-
-def initialise_sensor_input(sens_conf, sensor):
-    """
-    Initialises sensor input.
-    :param sens_conf: Sensor config
-    :type sens_conf: dict
-    :param sensor: Instance of GenericSensor to use
-    :type sensor: pi_mqtt_gpio.modules.GenericSensor
-    :return: None
-    :rtype: NoneType
-    """
-    sensor.setup_sensor(sens_conf)
-
-
-def sensor_timer_thread(SENSOR_MODULES, sensor_inputs, topic_prefix):
-    """
-    Timer thread for the sensors
-    To reduce cpu usage, there is only one cyclic thread for all sensors.
-    At the beginning the cycle time is calculated (ggT) to match all intervals.
-    For each sensor interval, the reduction value is calculated, that triggers
-    the read, round and publish for the sensor, when loop_count is a multiple
-    of it. In worst case, the cycle_time is 1 second, in best case, e.g., when
-    there is only one sensor, cycle_time is its interval.
-    """
-    # calculate the min time
-    arr = []
-    for sens_conf in sensor_inputs:
-        arr.append(sens_conf.get("interval", 60))
-
-    # get the greatest common divisor (gcd) for the list of interval times
-    cycle_time = reduce(lambda x, y: gcd(x, y), arr)
-
-    _LOG.debug(
-        "sensor_timer_thread: calculated cycle_time will be %d seconds", cycle_time
-    )
-
-    for sens_conf in sensor_inputs:
-        sens_conf["interval_reduction"] = sens_conf.get("interval", 60) / cycle_time
-
-    # Start the cyclic thread
-    loop_count = 0
-    next_call = time()
-    while True:
-        loop_count += 1
-        for sens_conf in sensor_inputs:
-            if loop_count % sens_conf["interval_reduction"] == 0:
-                sensor = SENSOR_MODULES[sens_conf["module"]]
-
-                try:
-                    value = sensor.get_value(sens_conf)
-                    if value is None:
-                        _LOG.warning(
-                            "sensor_timer_thread: sensor %r returned null",
-                            sens_conf["name"],
-                        )
-                        continue
-                    value = round(value, sens_conf["digits"])
-
-                    _LOG.info(
-                        "sensor_timer_thread: reading sensor '%s' value %r",
-                        sens_conf["name"],
-                        value,
-                    )
-
-                    # publish each value
-                    client.publish(
-                        "%s/%s/%s" % (topic_prefix, SENSOR_TOPIC, sens_conf["name"]),
-                        payload=value,
-                        retain=sens_conf["retain"],
-                    )
-                except ModuleConfigInvalid as exc:
-                    _LOG.error(
-                        "sensor_timer_thread: failed to read sensor '%s': %s",
-                        sens_conf["name"],
-                        exc,
-                    )
-
-        # schedule next call
-        next_call = next_call + cycle_time  # every cycle_time sec
-        sleep(max(0, next_call - time()))
-
-
-def validate_stream_read_config(stream_conf):
-    """
-    Validates stream read config.
-    :param stream_conf: Stream read config
-    :type stream_conf: dict
-    :return: None
-    :rtype: NoneType
-    """
-    stream_module = import_module(
-        "pi_mqtt_gpio.modules.%s" % STREAM_CONFIGS[stream_conf["module"]]["module"]
-    )
-    # Doesn't need to be a deep copy because we won't modify the base
-    # validation rules, just add more of them.
-    stream_read_schema = CONFIG_SCHEMA["stream_reads"]["schema"]["schema"].copy()
-    stream_read_schema.update(getattr(stream_module, "STREAM_SCHEMA", {}))
-    stream_validator = cerberus.Validator(stream_read_schema)
-    if not stream_validator.validate(stream_conf):
-        raise ModuleConfigInvalid(stream_validator.errors)
-    return stream_validator.normalized(stream_conf)
-
-
-def validate_stream_write_config(stream_conf):
-    """
-    Validates stream write config.
-    :param stream_conf: Stream write config
-    :type stream_conf: dict
-    :return: None
-    :rtype: NoneType
-    """
-    stream_module = import_module(
-        "pi_mqtt_gpio.modules.%s" % STREAM_CONFIGS[stream_conf["module"]]["module"]
-    )
-    # Doesn't need to be a deep copy because we won't modify the base
-    # validation rules, just add more of them.
-    stream_write_schema = CONFIG_SCHEMA["stream_writes"]["schema"]["schema"].copy()
-    stream_write_schema.update(getattr(stream_module, "STREAM_SCHEMA", {}))
-    stream_validator = cerberus.Validator(stream_write_schema)
-    if not stream_validator.validate(stream_conf):
-        raise ModuleConfigInvalid(stream_validator.errors)
-    return stream_validator.normalized(stream_conf)
-
-
-def initialise_stream(stream_conf, stream):
-    """
-    Initialises stream.
-    :param stream_conf: Stream config
-    :type stream_conf: dict
-    :param stream: Instance of GenericStream to use
-    :type stream: pi_mqtt_gpio.modules.GenericStream
-    :return: None
-    :rtype: NoneType
-    """
-    stream.setup_stream(stream_conf)
-
-
-def stream_timer_thread(STREAM_MODULES, stream_reads, topic_prefix):
-    """
-    Timer thread for the stream reads
-    To reduce cpu usage, there is only one cyclic thread for all streams.
-    At the beginning the cycle time is calculated (ggT) to match all intervals.
-    For each stream interval, the reduction value is calculated, that triggers
-    the read, round and publish for the stream, when loop_count is a multiple
-    of it. In worst case, the cycle_time is 1 second, in best case, e.g., when
-    there is only one stream, cycle_time is its interval.
-    """
-    # calculate the min time
-    arr = []
-    for stream_conf in stream_reads:
-        arr.append(stream_conf.get("interval", 60))
-
-    # get the greatest common divisor (gcd) for the list of interval times
-    cycle_time = reduce(lambda x, y: gcd(x, y), arr)
-
-    _LOG.debug(
-        "stream_timer_thread: calculated cycle_time will be %d seconds", cycle_time
-    )
-
-    for stream_conf in stream_reads:
-        stream_conf["interval_reduction"] = stream_conf.get("interval", 60) / cycle_time
-
-    # Start the cyclic thread
-    loop_count = 0
-    next_call = time()
-    while True:
-        loop_count += 1
-        for stream_conf in stream_reads:
-            if loop_count % stream_conf["interval_reduction"] == 0:
-                stream = STREAM_MODULES[stream_conf["module"]]
-
-                try:
-                    data = stream.read(stream_conf)
-                    if data is None:
-                        continue
-                    if len(data) == 0:
-                        continue
-
-                    _LOG.info(
-                        "stream_timer_thread: reading stream '%s' data %s",
-                        stream_conf["name"],
-                        data,
-                    )
-                    client.publish(
-                        "%s/%s/%s" % (topic_prefix, STREAM_TOPIC, stream_conf["name"]),
-                        payload=data,
-                        retain=stream_conf["retain"],
-                    )
-                except ModuleConfigInvalid as exc:
-                    _LOG.error(
-                        "stream_timer_thread: failed to read stream '%s': %s",
-                        stream_conf["name"],
-                        exc,
-                    )
-
-        # schedule next call
-        next_call = next_call + cycle_time  # every cycle_time sec
-        sleep(max(0, next_call - time()))
-
-
 def gpio_interrupt_callback(module, pin):
     try:
         in_conf = GPIO_INTERRUPT_LOOKUP[module][pin]
@@ -865,122 +479,9 @@ def gpio_interrupt_callback(module, pin):
     )
 
 
-def hass_announce_digital_input(in_conf, topic_prefix, mqtt_config):
-    """
-    Announces digital input as binary_sensor to HomeAssistant.
-    :param in_conf: Input config
-    :type in_conf: dict
-    :return: None
-    :rtype: NoneType
-    """
-    device_id = (
-        "pi-mqtt-gpio-%s" % sha1(topic_prefix.encode("utf8")).hexdigest()[:8]
-    )  # TODO: Unify with MQTT Client ID
-    sensor_name = in_conf["name"]
-    sensor_config = {
-        "name": sensor_name,
-        "unique_id": "%s_%s_input_%s" % (device_id, in_conf["module"], sensor_name),
-        "state_topic": "%s/%s/%s" % (topic_prefix, INPUT_TOPIC, in_conf["name"]),
-        "availability_topic": "%s/%s" % (topic_prefix, mqtt_config["status_topic"]),
-        "payload_available": mqtt_config["status_payload_running"],
-        "payload_not_available": mqtt_config["status_payload_dead"],
-        "payload_on": in_conf["on_payload"],
-        "payload_off": in_conf["off_payload"],
-        "device": {
-            "manufacturer": "MQTT GPIO",
-            "identifiers": ["mqtt-gpio", device_id],
-            "name": mqtt_config["discovery_name"],
-        },
-    }
-
-    client.publish(
-        "%s/%s/%s/%s/config"
-        % (mqtt_config["discovery_prefix"], "binary_sensor", device_id, sensor_name),
-        payload=json.dumps(sensor_config),
-        retain=True,
-    )
-
-
-def hass_announce_digital_output(out_conf, topic_prefix, mqtt_config):
-    """
-    Announces digital output as switch to HomeAssistant.
-    :param out_conf: Output config
-    :type out_conf: dict
-    :return: None
-    :rtype: NoneType
-    """
-    device_id = (
-        "pi-mqtt-gpio-%s" % sha1(topic_prefix.encode("utf8")).hexdigest()[:8]
-    )  # TODO: Unify with MQTT Client ID
-    sensor_name = out_conf["name"]
-    sensor_config = {
-        "name": sensor_name,
-        "unique_id": "%s_%s_output_%s" % (device_id, out_conf["module"], sensor_name),
-        "state_topic": "%s/%s/%s" % (topic_prefix, OUTPUT_TOPIC, out_conf["name"]),
-        "command_topic": "%s/%s/%s/%s"
-        % (topic_prefix, OUTPUT_TOPIC, out_conf["name"], SET_TOPIC),
-        "availability_topic": "%s/%s" % (topic_prefix, mqtt_config["status_topic"]),
-        "payload_available": mqtt_config["status_payload_running"],
-        "payload_not_available": mqtt_config["status_payload_dead"],
-        "payload_on": out_conf["on_payload"],
-        "payload_off": out_conf["off_payload"],
-        "device": {
-            "manufacturer": "MQTT GPIO",
-            "identifiers": ["mqtt-gpio", device_id],
-            "name": mqtt_config["discovery_name"],
-        },
-    }
-
-    client.publish(
-        "%s/%s/%s/%s/config"
-        % (mqtt_config["discovery_prefix"], "switch", device_id, sensor_name),
-        payload=json.dumps(sensor_config),
-        retain=True,
-    )
-
-
-def hass_announce_sensor_input(in_conf, topic_prefix, mqtt_config):
-    """
-    Announces digital output as sensor to HomeAssistant.
-    :param in_conf: Input config
-    :type in_conf: dict
-    :return: None
-    :rtype: NoneType
-    """
-    device_id = (
-        "pi-mqtt-gpio-%s" % sha1(topic_prefix.encode("utf8")).hexdigest()[:8]
-    )  # TODO: Unify with MQTT Client ID
-    sensor_name = in_conf["name"]
-    sensor_config = {
-        "name": sensor_name,
-        "unique_id": "%s_%s_output_%s" % (device_id, in_conf["module"], sensor_name),
-        "state_topic": "%s/%s/%s" % (topic_prefix, SENSOR_TOPIC, in_conf["name"]),
-        "availability_topic": "%s/%s" % (topic_prefix, mqtt_config["status_topic"]),
-        "payload_available": mqtt_config["status_payload_running"],
-        "payload_not_available": mqtt_config["status_payload_dead"],
-        "expire_after": 2 * int(in_conf.get("interval", "60")) + 5,
-        "device": {
-            "manufacturer": "MQTT GPIO",
-            "identifiers": ["mqtt-gpio", device_id],
-            "name": mqtt_config["discovery_name"],
-        },
-    }
-    if "unit_of_measurement" in in_conf:
-        sensor_config["unit_of_measurement"] = in_conf["unit_of_measurement"]
-
-    client.publish(
-        "%s/%s/%s/%s/config"
-        % (mqtt_config["discovery_prefix"], "sensor", device_id, sensor_name),
-        payload=json.dumps(sensor_config),
-        retain=True,
-    )
-
-
 def main(args):
     global digital_inputs
     global digital_outputs
-    global sensor_inputs
-    global stream_writes
     global client
     global scheduler
 
@@ -1002,11 +503,8 @@ def main(args):
 
     digital_inputs = config["digital_inputs"]
     digital_outputs = config["digital_outputs"]
-    sensor_inputs = config["sensor_inputs"]
-    stream_reads = config["stream_reads"]
-    stream_writes = config["stream_writes"]
 
-    client = init_mqtt(config["mqtt"], config["digital_outputs"], config["stream_writes"])
+    client = init_mqtt(config["mqtt"], config["digital_outputs"])
     topic_prefix = config["mqtt"]["topic_prefix"]
 
     # Install modules for GPIOs
@@ -1023,85 +521,12 @@ def main(args):
             )
             sys.exit(1)
 
-    # Install modules for Sensors
-    for sensor_config in config.get("sensor_modules", {}):
-        SENSOR_CONFIGS[sensor_config["name"]] = sensor_config
-        try:
-            SENSOR_MODULES[sensor_config["name"]] = configure_sensor_module(sensor_config)
-        except ModuleConfigInvalid as exc:
-            _LOG.error(
-                "Config for %r module named %r did not validate:\n%s",
-                sensor_config["module"],
-                sensor_config["name"],
-                yaml.dump(exc.errors),
-            )
-            sys.exit(1)
-
-    # Install modules for Streams
-    for stream_config in config.get("stream_modules", {}):
-        STREAM_CONFIGS[stream_config["name"]] = stream_config
-        try:
-            STREAM_MODULES[stream_config["name"]] = configure_stream_module(stream_config)
-        except ModuleConfigInvalid as exc:
-            _LOG.error(
-                "Config for %r module named %r did not validate:\n%s",
-                stream_config["module"],
-                stream_config["name"],
-                yaml.dump(exc.errors),
-            )
-            sys.exit(1)
-
     for in_conf in digital_inputs:
         initialise_digital_input(in_conf, GPIO_MODULES[in_conf["module"]])
         LAST_STATES[in_conf["name"]] = None
 
     for out_conf in digital_outputs:
         initialise_digital_output(out_conf, GPIO_MODULES[out_conf["module"]])
-
-    for sens_conf in sensor_inputs:
-        try:
-            SENSOR_INPUT_CONFIGS[sens_conf["name"]] = validate_sensor_input_config(
-                sens_conf
-            )
-        except ModuleConfigInvalid as exc:
-            _LOG.error(
-                "Config for %r sensor named %r did not validate:\n%s",
-                SENSOR_CONFIGS[sens_conf["module"]]["module"],
-                sens_conf["name"],
-                yaml.dump(exc.errors),
-            )
-            sys.exit(1)
-        initialise_sensor_input(sens_conf, SENSOR_MODULES[sens_conf["module"]])
-
-    for stream_conf in stream_reads:
-        try:
-            STREAM_READ_CONFIGS[stream_conf["name"]] = validate_stream_read_config(
-                stream_conf
-            )
-        except ModuleConfigInvalid as exc:
-            _LOG.error(
-                "Config for %r stream named %r did not validate:\n%s",
-                STREAM_CONFIGS[stream_conf["module"]]["module"],
-                stream_conf["name"],
-                yaml.dump(exc.errors),
-            )
-            sys.exit(1)
-        initialise_stream(stream_conf, STREAM_MODULES[stream_conf["module"]])
-
-    for stream_conf in stream_writes:
-        try:
-            STREAM_WRITE_CONFIGS[stream_conf["name"]] = validate_stream_write_config(
-                stream_conf
-            )
-        except ModuleConfigInvalid as exc:
-            _LOG.error(
-                "Config for %r stream named %r did not validate:\n%s",
-                STREAM_CONFIGS[stream_conf["module"]]["module"],
-                stream_conf["name"],
-                yaml.dump(exc.errors),
-            )
-            sys.exit(1)
-        initialise_stream(stream_conf, STREAM_MODULES[stream_conf["module"]])
 
     try:
         client.connect(
@@ -1128,36 +553,6 @@ def main(args):
     scheduler = Scheduler()
 
     try:
-        # Starting the sensor thread (if there are sensors configured)
-        if sensor_inputs:
-            sensor_thread = threading.Thread(
-                target=sensor_timer_thread,
-                kwargs={
-                    "SENSOR_MODULES": SENSOR_MODULES,
-                    "sensor_inputs": SENSOR_INPUT_CONFIGS.values(),
-                    "topic_prefix": topic_prefix,
-                },
-            )
-            sensor_thread.name = "pi-mqtt-gpio_SensorReader"
-            # stops the thread, when main program terminates
-            sensor_thread.daemon = True
-            sensor_thread.start()
-
-        # Starting the stream thread (if there are streams configured)
-        if stream_reads:
-            stream_thread = threading.Thread(
-                target=stream_timer_thread,
-                kwargs={
-                    "STREAM_MODULES": STREAM_MODULES,
-                    "stream_reads": STREAM_READ_CONFIGS.values(),
-                    "topic_prefix": topic_prefix,
-                },
-            )
-            stream_thread.name = "pi-mqtt-gpio_StreamReader"
-            # stops the thread, when main program terminates
-            stream_thread.daemon = True
-            stream_thread.start()
-
         while True:
             for in_conf in digital_inputs:
                 # Only read pins that are not configured as interrupt.
