@@ -1,7 +1,7 @@
 from pi_mqtt_gpio.modules import GenericGPIO
 
 
-REQUIREMENTS = ("pifacedigitalio", "pifacecommon")
+REQUIREMENTS = ("pifaceio", "pifacecommon")
 
 DIRECTIONS = None
 PULLUPS = None
@@ -13,7 +13,7 @@ class GPIO(GenericGPIO):
     """
 
     def __init__(self, config):
-        import pifacedigitalio as pfdio
+        import pifaceio as pfdio
 
         pfdio.init()
         self.io = pfdio
