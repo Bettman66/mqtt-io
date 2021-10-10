@@ -21,4 +21,4 @@ digital_outputs:
     module: rpi
     pin: 17
     on_payload: "true"
-    off_payload: "false
+    off_payload: "false"
