@@ -2,7 +2,7 @@
 
 ## * Abgespeckte Version nur PIFace2 und GPIOS *
 
-Da das originale Projekt bei mir reconnect Probleme macht, habe ich auf eine ältere Version und mich auf PIFace2/GPIO downgegradet.
+Da das originale Projekt bei mir reconnect Probleme macht, habe ich auf eine ältere Version und auf PIFace2/GPIO downgegradet.
 Installation:
 sudo apt install python3.9-distutils
 sudo apt install python3-pip
