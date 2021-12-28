@@ -1,5 +1,18 @@
 # MQTT IO
 
+## * Abgespeckte Version nur PIFace2 und GPIOS *
+
+Da das originale Projekt bei mir reconnect Probleme macht, habe ich auf eine ältere Version und mich auf PIFace2/GPIO downgegradet.
+Installation:
+sudo apt install python3.9-distutils
+sudo apt install python3-pip
+sudo pip install setuptools
+
+sudo apt install git
+git clone https://github.com/Bettman66/mqtt-io
+cd mqt*
+sudo python3 setup.py install
+
 [![Discord](https://img.shields.io/discord/713749043662290974.svg?label=Chat%20on%20Discord&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2)](https://discord.gg/gWyV9W4)
 
 Exposes general purpose IO (GPIO), hardware sensors and serial devices to an MQTT server, enabling remote monitoring and control. This allows pins to be read and switched by reading or writing messages to MQTT topics. The streams and I2C sensors will be read periodically and publish their values.
