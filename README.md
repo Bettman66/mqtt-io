@@ -3,15 +3,19 @@
 ## * Abgespeckte Version nur PIFace2 und GPIOS *
 
 Da das originale Projekt bei mir reconnect Probleme macht, habe ich auf eine ältere Version und auf PIFace2/GPIO downgegradet.
-Installation:
-sudo apt install python3.9-distutils
-sudo apt install python3-pip
+# Installation:
+sudo apt install python3.9-distutils python3-pip git
+
 sudo pip install setuptools
 
-sudo apt install git
 git clone https://github.com/Bettman66/mqtt-io
+
 cd mqt*
+
 sudo python3 setup.py install
+
+
+-----------------------------
 
 [![Discord](https://img.shields.io/discord/713749043662290974.svg?label=Chat%20on%20Discord&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2)](https://discord.gg/gWyV9W4)
 
