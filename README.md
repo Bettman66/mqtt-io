@@ -9,12 +9,20 @@ sudo apt install python3.9-distutils python3-pip git
 sudo pip install setuptools
 
 git clone https://github.com/Bettman66/mqtt-io
-
 cd mqt*
-
 sudo python3 setup.py install
 
+# Python3.11:
+sudo apt install python3-distutils python3-pip git
 
+sudo pip install pyyaml --break-system-packages
+sudo pip install cerberus --break-system-packages
+sudo pip install paho-mqtt --break-system-packages
+sudo pip install pifacecommon --break-system-packages
+
+git clone https://github.com/Bettman66/mqtt-io
+cd mqt*
+sudo python3 setup.py install
 -----------------------------
 
 [![Discord](https://img.shields.io/discord/713749043662290974.svg?label=Chat%20on%20Discord&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2)](https://discord.gg/gWyV9W4)
