@@ -33,7 +33,7 @@ pip install paho-mqtt
 
 python3 setup.py install
 
-#
+# starts
 python3 /usr/local/lib/python3.11/dist-packages/pi_mqtt_gpio-0.5.6-py3.11.egg/pi_mqtt_gpio/server.py /home/pi/config.yml
 
 -----------------------------
