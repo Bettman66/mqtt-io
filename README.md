@@ -4,32 +4,25 @@
 
 Da das originale Projekt bei mir reconnect Probleme macht, habe ich auf eine ältere Version und auf PIFace2/GPIO downgegradet.
 # Installation:
-sudo apt install python3.9-distutils python3-pip git
-
+sudo apt install python3-distutils python3-pip git
 sudo pip install setuptools
-
 git clone https://github.com/Bettman66/mqtt-io
-
 cd mqt*
-
 sudo python3 setup.py install
 
 # Python3.11:
 sudo apt install python3-distutils python3-pip git
-
-sudo pip install pyyaml --break-system-packages
-
-sudo pip install cerberus --break-system-packages
-
-sudo pip install paho-mqtt --break-system-packages
-
-sudo pip install pifacecommon --break-system-packages
-
+python3 -m venv mqttio
+source mqttio/bin/activate
 git clone https://github.com/Bettman66/mqtt-io
+cd mqtt-io
+pip install pyyaml
+pip install cerberus
+pip install paho-mqtt
+python3 setup.py install
 
-cd mqt*
-
-sudo python3 setup.py install
+#
+python3 /usr/local/lib/python3.11/dist-packages/pi_mqtt_gpio-0.5.6-py3.11.egg/pi_mqtt_gpio/server.py /home/pi/config.yml
 
 -----------------------------
 
